@@ -21,206 +21,169 @@
 //  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 //============================================================================
 
-module emu
+`default_nettype none
+
+module guest_top
 (
-	//Master input clock
-	input         CLK_50M,
+	input         CLOCK_27,
+`ifdef USE_CLOCK_50
+	input         CLOCK_50,
+`endif
 
-	//Async reset from top-level module.
-	//Can be used as initial reset.
-	input         RESET,
-
-	//Must be passed to hps_io module
-	inout  [48:0] HPS_BUS,
-
-	//Base video clock. Usually equals to CLK_SYS.
-	output        CLK_VIDEO,
-
-	//Multiple resolutions are supported using different CE_PIXEL rates.
-	//Must be based on CLK_VIDEO
-	output        CE_PIXEL,
-
-	//Video aspect ratio for HDMI. Most retro systems have ratio 4:3.
-	//if VIDEO_ARX[12] or VIDEO_ARY[12] is set then [11:0] contains scaled size instead of aspect ratio.
-	output [12:0] VIDEO_ARX,
-	output [12:0] VIDEO_ARY,
-
-	output  [7:0] VGA_R,
-	output  [7:0] VGA_G,
-	output  [7:0] VGA_B,
+	output        LED,
+	output [VGA_BITS-1:0] VGA_R,
+	output [VGA_BITS-1:0] VGA_G,
+	output [VGA_BITS-1:0] VGA_B,
 	output        VGA_HS,
 	output        VGA_VS,
-	output        VGA_DE,    // = ~(VBlank | HBlank)
-	output        VGA_F1,
-	output [1:0]  VGA_SL,
-	output        VGA_SCALER, // Force VGA scaler
-	output        VGA_DISABLE, // analog out is off
 
-	input  [11:0] HDMI_WIDTH,
-	input  [11:0] HDMI_HEIGHT,
-	output        HDMI_FREEZE,
-
-`ifdef MISTER_FB
-	// Use framebuffer in DDRAM
-	// FB_FORMAT:
-	//    [2:0] : 011=8bpp(palette) 100=16bpp 101=24bpp 110=32bpp
-	//    [3]   : 0=16bits 565 1=16bits 1555
-	//    [4]   : 0=RGB  1=BGR (for 16/24/32 modes)
-	//
-	// FB_STRIDE either 0 (rounded to 256 bytes) or multiple of pixel size (in bytes)
-	output        FB_EN,
-	output  [4:0] FB_FORMAT,
-	output [11:0] FB_WIDTH,
-	output [11:0] FB_HEIGHT,
-	output [31:0] FB_BASE,
-	output [13:0] FB_STRIDE,
-	input         FB_VBL,
-	input         FB_LL,
-	output        FB_FORCE_BLANK,
-
-`ifdef MISTER_FB_PALETTE
-	// Palette control for 8bit modes.
-	// Ignored for other video modes.
-	output        FB_PAL_CLK,
-	output  [7:0] FB_PAL_ADDR,
-	output [23:0] FB_PAL_DOUT,
-	input  [23:0] FB_PAL_DIN,
-	output        FB_PAL_WR,
-`endif
+`ifdef USE_HDMI
+	output        HDMI_RST,
+	output  [7:0] HDMI_R,
+	output  [7:0] HDMI_G,
+	output  [7:0] HDMI_B,
+	output        HDMI_HS,
+	output        HDMI_VS,
+	output        HDMI_PCLK,
+	output        HDMI_DE,
+	inout         HDMI_SDA,
+	inout         HDMI_SCL,
+	input         HDMI_INT,
 `endif
 
-	output        LED_USER,  // 1 - ON, 0 - OFF.
+	input         SPI_SCK,
+	inout         SPI_DO,
+	input         SPI_DI,
+	input         SPI_SS2,    // data_io
+	input         SPI_SS3,    // OSD
+	input         CONF_DATA0, // SPI_SS for user_io
 
-	// b[1]: 0 - LED status is system status OR'd with b[0]
-	//       1 - LED status is controled solely by b[0]
-	// hint: supply 2'b00 to let the system control the LED.
-	output  [1:0] LED_POWER,
-	output  [1:0] LED_DISK,
+`ifdef USE_QSPI
+	input         QSCK,
+	input         QCSn,
+	inout   [3:0] QDAT,
+`endif
+`ifndef NO_DIRECT_UPLOAD
+	input         SPI_SS4,
+`endif
 
-	// I/O board button press simulation (active high)
-	// b[1]: user button
-	// b[0]: osd button
-	output  [1:0] BUTTONS,
-
-	input         CLK_AUDIO, // 24.576 MHz
-	output [15:0] AUDIO_L,
-	output [15:0] AUDIO_R,
-	output        AUDIO_S,   // 1 - signed audio samples, 0 - unsigned
-	output  [1:0] AUDIO_MIX, // 0 - no mix, 1 - 25%, 2 - 50%, 3 - 100% (mono)
-
-	//ADC
-	inout   [3:0] ADC_BUS,
-
-	//SD-SPI
-	output        SD_SCK,
-	output        SD_MOSI,
-	input         SD_MISO,
-	output        SD_CS,
-	input         SD_CD,
-
-	//High latency DDR3 RAM interface
-	//Use for non-critical time purposes
-	output        DDRAM_CLK,
-	input         DDRAM_BUSY,
-	output  [7:0] DDRAM_BURSTCNT,
-	output [28:0] DDRAM_ADDR,
-	input  [63:0] DDRAM_DOUT,
-	input         DDRAM_DOUT_READY,
-	output        DDRAM_RD,
-	output [63:0] DDRAM_DIN,
-	output  [7:0] DDRAM_BE,
-	output        DDRAM_WE,
-
-	//SDRAM interface with lower latency
-	output        SDRAM_CLK,
-	output        SDRAM_CKE,
 	output [12:0] SDRAM_A,
-	output  [1:0] SDRAM_BA,
 	inout  [15:0] SDRAM_DQ,
 	output        SDRAM_DQML,
 	output        SDRAM_DQMH,
-	output        SDRAM_nCS,
+	output        SDRAM_nWE,
 	output        SDRAM_nCAS,
 	output        SDRAM_nRAS,
-	output        SDRAM_nWE,
+	output        SDRAM_nCS,
+	output  [1:0] SDRAM_BA,
+	output        SDRAM_CLK,
+	output        SDRAM_CKE,
 
-`ifdef MISTER_DUAL_SDRAM
-	//Secondary SDRAM
-	//Set all output SDRAM_* signals to Z ASAP if SDRAM2_EN is 0
-	input         SDRAM2_EN,
-	output        SDRAM2_CLK,
+`ifdef DUAL_SDRAM
 	output [12:0] SDRAM2_A,
-	output  [1:0] SDRAM2_BA,
 	inout  [15:0] SDRAM2_DQ,
-	output        SDRAM2_nCS,
+	output        SDRAM2_DQML,
+	output        SDRAM2_DQMH,
+	output        SDRAM2_nWE,
 	output        SDRAM2_nCAS,
 	output        SDRAM2_nRAS,
-	output        SDRAM2_nWE,
+	output        SDRAM2_nCS,
+	output  [1:0] SDRAM2_BA,
+	output        SDRAM2_CLK,
+	output        SDRAM2_CKE,
 `endif
 
-	input         UART_CTS,
-	output        UART_RTS,
-	input         UART_RXD,
-	output        UART_TXD,
-	output        UART_DTR,
-	input         UART_DSR,
+	output        AUDIO_L,
+	output        AUDIO_R,
+`ifdef I2S_AUDIO
+	output        I2S_BCK,
+	output        I2S_LRCK,
+	output        I2S_DATA,
+`endif
+`ifdef SPDIF_AUDIO
+	output        SPDIF,
+`endif
+`ifdef USE_AUDIO_IN
+	input         AUDIO_IN,
+`endif
+	input         UART_RX,
+	output        UART_TX
 
-	// Open-drain User port.
-	// 0 - D+/RX
-	// 1 - D-/TX
-	// 2..6 - USR2..USR6
-	// Set USER_OUT to 1 to read from USER_IN.
-	input   [6:0] USER_IN,
-	output  [6:0] USER_OUT,
-
-	input         OSD_STATUS
 );
 
-assign ADC_BUS  = 'Z;
-assign USER_OUT = '1;
-assign {UART_RTS, UART_TXD, UART_DTR} = 0;
-assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = 0;
+`ifdef NO_DIRECT_UPLOAD
+localparam bit DIRECT_UPLOAD = 0;
+wire SPI_SS4 = 1;
+`else
+localparam bit DIRECT_UPLOAD = 1;
+`endif
 
-assign LED_USER  = mdv_led | ioctl_download | sd_act;
-assign LED_DISK  = {1'b1, status[0]};
-assign LED_POWER = 0;
-assign BUTTONS   = 0;
-assign VGA_SCALER= 0;
-assign VGA_DISABLE = 0;
-assign HDMI_FREEZE = 0;
+`ifdef USE_QSPI
+localparam bit QSPI = 1;
+assign QDAT = 4'hZ;
+`else
+localparam bit QSPI = 0;
+`endif
 
-video_freak video_freak
-(
-	.*,
-	.VGA_DE_IN(VGA_DE),
-	.VGA_DE(),
-	.ARX((!ar) ? 12'd4 : (ar - 1'd1)),
-	.ARY((!ar) ? 12'd3 : 12'd0),
-	.CROP_SIZE(0),
-	.CROP_OFF(0),
-	.SCALE(status[14:13])
-);
+`ifdef VGA_8BIT
+localparam VGA_BITS = 8;
+`else
+localparam VGA_BITS = 6;
+`endif
+
+`ifdef USE_HDMI
+localparam bit HDMI = 1;
+assign HDMI_RST = 1'b1;
+`else
+localparam bit HDMI = 0;
+`endif
+
+`ifdef BIG_OSD
+localparam bit BIG_OSD = 1;
+`define SEP "-;",
+`else
+localparam bit BIG_OSD = 0;
+`define SEP
+`endif
+
+// remove this if the 2nd chip is actually used
+`ifdef DUAL_SDRAM
+assign SDRAM2_A = 13'hZZZZ;
+assign SDRAM2_BA = 0;
+assign SDRAM2_DQML = 0;
+assign SDRAM2_DQMH = 0;
+assign SDRAM2_CKE = 0;
+assign SDRAM2_CLK = 0;
+assign SDRAM2_nCS = 1;
+assign SDRAM2_DQ = 16'hZZZZ;
+assign SDRAM2_nCAS = 1;
+assign SDRAM2_nRAS = 1;
+assign SDRAM2_nWE = 1;
+`endif
+
+
+assign LED  = !(mdv_led | ioctl_download | sd_act);
+
 
 /////////////////  CONFIGURATION  /////////////////
+
 `include "build_id.v" 
 parameter CONF_STR = {
 	"QL;;",
-	"SC0,WIN,Mount HD image;",	
-	"-;",
+	"S0U,WIN,Mount HD image;",	
+	`SEP
 	"F2,MDV,Load MDV image;",
 	"O2,MDV direction,normal,reverse;",
-	"-;",
+	`SEP
 	"F4,ROM,Load OS;",
-	"-;",
+	`SEP
 	"O3,Video mode,PAL,NTSC;",
-	"OBC,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"O9A,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%;",
-	"ODE,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
-	"-;",
+	`SEP
 	"O78,CPU speed,QL,16 Mhz,24 Mhz,Full;",
 	"O45,RAM,128k,640k,896k,4096k;",
-	"R0,Reset & unload MDV;",
-	"V,v",`BUILD_DATE
+	"T0,Reset & unload MDV;",
+	"V,v 40Aniversario",`BUILD_DATE
 };
 
 parameter MDV_IOCTL_INDEX = 8'd2;
@@ -233,7 +196,6 @@ wire [1:0] cpu_speed = status[8:7];
 wire [1:0] scale = status[10:9];
 wire ql_mode = cpu_speed == 2'b00;
 wire gc_en = ram_cfg == 2'b11;
-wire [1:0] ar = status[12:11];
 
 reg [1:0] ram_cfg;			// 00 = 128k, 01 = 640k, 10 = 896k, 11 = 4096k
 always @(posedge clk_sys) if (reset) ram_cfg <= status[5:4];
@@ -241,16 +203,17 @@ always @(posedge clk_sys) if (reset) ram_cfg <= status[5:4];
 
 /////////////////  CLOCKS  ////////////////////////
 
-wire clk_sys;
+wire clk_sys,clk_video;
 wire pll_locked;
 
 pll pll
 (
-	.refclk(CLK_50M),
-	.rst(0),
-	.outclk_0(clk_sys),						// System clock
-	.locked(pll_locked)
+    .inclk0(CLOCK_27),
+    .c0(clk_sys),  //84 MHZ
+	 .c1(clk_video),
+    .locked(pll_locked)
 );
+
 
 // 84MHz sys_clk
 parameter FRACT_BUS_QL = 17'd11702;		// 84MHz * 11702 / 65536 = 14.999MHz
@@ -366,87 +329,200 @@ wire [31:0] sd_lba;
 wire        sd_rd;
 wire        sd_wr;
 wire        sd_ack;
-wire  [7:0] sd_buff_addr;
-wire [15:0] sd_buff_dout;
-wire [15:0] sd_buff_din;
+wire        sd_ack_conf;
+wire        sd_conf;
+wire        sd_sdhc;
+wire  [8:0] sd_buff_addr;
+wire [7:0] sd_buff_dout;
+wire [7:0] sd_buff_din;
 wire        sd_buff_wr;
 wire        img_mounted;
 wire        img_readonly;
 wire [63:0] img_size;
 
-wire [24:0] ps2_mouse;
-wire [10:0] ps2_key;
+
 wire [32:0] TIMESTAMP;
 
-wire        forced_scandoubler;
-wire [21:0] gamma_bus;
+wire        key_pressed;
+wire [7:0]  key_code;
+wire        key_strobe;
+wire        key_extended;
 
-hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io
+
+
+//hps_io #(.CONF_STR(CONF_STR), .WIDE(1)) hps_io
+//(
+//	.clk_sys(clk_sys),
+//	.HPS_BUS(HPS_BUS),
+//
+//	.buttons(buttons),
+//	.status(status),
+//	.forced_scandoubler(forced_scandoubler),
+//	.gamma_bus(gamma_bus),
+//	
+//	.TIMESTAMP(TIMESTAMP),
+//
+//	.ioctl_download(ioctl_download),
+//	.ioctl_index(ioctl_index),
+//	.ioctl_wr(ioctl_wr),
+//	.ioctl_addr(ioctl_addr),
+//	.ioctl_dout(ioctl_data),
+//	.ioctl_wait(ioctl_wait),
+//
+//	.sd_lba('{sd_lba}),
+//	.sd_rd(sd_rd),
+//	.sd_wr(sd_wr),
+//	.sd_ack(sd_ack),
+//	.sd_buff_addr(sd_buff_addr),
+//	.sd_buff_dout(sd_buff_dout),
+//	.sd_buff_din('{sd_buff_din}),
+//	.sd_buff_wr(sd_buff_wr),
+//	.img_mounted(img_mounted),
+//	.img_readonly(img_readonly),
+//	.img_size(img_size),
+//	
+//	.ps2_key(ps2_key),
+//	.ps2_mouse(ps2_mouse),
+//
+//	.joystick_0(joystick_0),
+//	.joystick_1(joystick_1)
+//);
+
+wire scandoubler_disable;
+wire ypbpr;
+wire no_csync;
+wire  [1:0] switches;
+wire [10:0] ps2_key ={key_strobe,key_pressed,key_extended,key_code};
+wire  [8:0] mouse_x;
+wire  [8:0] mouse_y;
+wire  [7:0] mouse_flags;
+wire        mouse_strobe;
+
+wire [24:0] ps2_mouse = { mouse_strobe_level, mouse_y[7:0], mouse_x[7:0], mouse_flags };
+reg         mouse_strobe_level;
+
+always @(posedge clk_sys) if (mouse_strobe) mouse_strobe_level <= ~mouse_strobe_level;
+
+
+
+user_io #(.STRLEN($size(CONF_STR)>>3), .SD_IMAGES(1), .FEATURES(32'h0 | (BIG_OSD << 13) | (HDMI << 14))) user_io
 (
-	.clk_sys(clk_sys),
-	.HPS_BUS(HPS_BUS),
+    .clk_sys(clk_sys),
+    .clk_sd(clk_sys),
+    .SPI_SS_IO(CONF_DATA0),
+    .SPI_CLK(SPI_SCK),
+    .SPI_MOSI(SPI_DI),
+    .SPI_MISO(SPI_DO),
 
-	.buttons(buttons),
-	.status(status),
-	.forced_scandoubler(forced_scandoubler),
-	.gamma_bus(gamma_bus),
-	
-	.TIMESTAMP(TIMESTAMP),
+    .conf_str(CONF_STR),
 
-	.ioctl_download(ioctl_download),
-	.ioctl_index(ioctl_index),
-	.ioctl_wr(ioctl_wr),
-	.ioctl_addr(ioctl_addr),
-	.ioctl_dout(ioctl_data),
-	.ioctl_wait(ioctl_wait),
+    .status(status),
+    .scandoubler_disable(scandoubler_disable),
+    .ypbpr(ypbpr),
+    .no_csync(no_csync),
+    .buttons(buttons),
+    .switches(switches),
+    .joystick_0(joystick_0),
+    .joystick_1(joystick_1),
+    .key_strobe(key_strobe),
+    .key_code(key_code),
+    .key_pressed(key_pressed),
+    .key_extended(key_extended),
 
-	.sd_lba('{sd_lba}),
-	.sd_rd(sd_rd),
-	.sd_wr(sd_wr),
-	.sd_ack(sd_ack),
-	.sd_buff_addr(sd_buff_addr),
-	.sd_buff_dout(sd_buff_dout),
-	.sd_buff_din('{sd_buff_din}),
-	.sd_buff_wr(sd_buff_wr),
-	.img_mounted(img_mounted),
-	.img_readonly(img_readonly),
-	.img_size(img_size),
-	
-	.ps2_key(ps2_key),
-	.ps2_mouse(ps2_mouse),
+    .mouse_x(mouse_x),
+    .mouse_y(mouse_y),
+    .mouse_flags(mouse_flags),
+    .mouse_strobe(mouse_strobe),
 
-	.joystick_0(joystick_0),
-	.joystick_1(joystick_1)
+`ifdef USE_HDMI
+    .i2c_start      (i2c_start      ),
+    .i2c_read       (i2c_read       ),
+    .i2c_addr       (i2c_addr       ),
+    .i2c_subaddr    (i2c_subaddr    ),
+    .i2c_dout       (i2c_dout       ),
+    .i2c_din        (i2c_din        ),
+    .i2c_ack        (i2c_ack        ),
+    .i2c_end        (i2c_end        ),
+`endif
+
+    .sd_lba(sd_lba),
+    .sd_rd(sd_rd),
+    .sd_wr(sd_wr),
+    .sd_ack(sd_ack),
+	 .sd_ack_conf  (sd_ack_conf   ),
+    .sd_dout(sd_buff_dout),
+    .sd_dout_strobe(sd_buff_wr),
+    .sd_din(sd_buff_din),
+    .sd_buff_addr(sd_buff_addr),
+    .sd_conf(sd_conf),
+    .sd_sdhc(sd_sdhc),
+    .img_mounted(img_mounted),
+    .img_size(img_size)
 );
+
+data_io  #(.DOUT_16(1)) data_io (
+    // SPI interface
+    .SPI_SCK        ( SPI_SCK ),
+    .SPI_SS2        ( SPI_SS2 ),
+    .SPI_DI         ( SPI_DI  ),
+    // ram interface
+    .clk_sys        ( clk_sys ),
+    //.clkref_n       ( ~clk_ref  ),
+    .ioctl_download ( ioctl_download ),
+    .ioctl_index    ( ioctl_index ),
+    .ioctl_wr       ( ioctl_wr ),
+    .ioctl_addr     ( ioctl_addr ),
+    .ioctl_dout     ( ioctl_data )
+);
+
 
 /////////////////  SD  ////////////////////////////
 
 // SD card emulator
-reg vsd_sel = 0;
-always @(posedge clk_sys) if (img_mounted) vsd_sel <= |img_size;
 
-wire vsd_miso;
+wire sd_miso;
 wire sd_clk;
 wire sd_mosi;
-wire sd_miso = sd_phys_cs? vsd_miso: SD_MISO;
 wire sd_cs1, sd_cs2;
-wire sd_phys_cs = vsd_sel? sd_cs2: sd_cs1;	// Physical SD as card2 if vitual SD is enabled
 
-sd_card #(.WIDE(1)) sd_card
-(
-	.*,
+//sd_card #(.WIDE(0)) sd_card
+//(
+//	.*,
+//
+//	.clk_spi(clk_sys),
+//	.sdhc(1),
+//	.sck(sd_clk),
+//	.ss(sd_cs1 || ~vsd_sel),
+//	.mosi(sd_mosi),
+//	.miso(vsd_miso)
+//);
 
-	.clk_spi(clk_sys),
-	.sdhc(1),
-	.sck(sd_clk),
-	.ss(sd_cs1 || ~vsd_sel),
-	.mosi(sd_mosi),
-	.miso(vsd_miso)
+sd_card sd_card (
+	.clk_sys         ( clk_sys        ),   // at least 2xsd_sck
+	// connection to io controller
+	.sd_lba          ( sd_lba         ),
+	.sd_rd           ( sd_rd          ),
+	.sd_wr           ( sd_wr          ),
+	.sd_ack          ( sd_ack         ),
+	.sd_conf         ( sd_conf        ),
+	.sd_ack_conf     ( sd_ack_conf    ),
+	.sd_sdhc         ( sd_sdhc        ),
+	.sd_buff_dout    ( sd_buff_dout   ),
+	.sd_buff_wr      ( sd_buff_wr     ),
+	.sd_buff_din     ( sd_buff_din    ),
+	.sd_buff_addr    ( sd_buff_addr   ),
+
+	.allow_sdhc 	( sd_sdhc            ),   // QLSD supports SDHC
+   .img_mounted   (img_mounted),
+	.img_size      (img_size),
+	// connection to local CPU
+	.sd_cs   		( sd_cs1 ),
+	.sd_sck  		( sd_clk          ),
+	.sd_sdi  		( sd_mosi         ),
+	.sd_sdo  		( sd_miso        )
 );
 
-assign SD_CS   = sd_phys_cs;
-assign SD_SCK  = sd_phys_cs? 1'd0: sd_clk;
-assign SD_MOSI = sd_phys_cs? 1'd0: sd_mosi;
+
 
 // QL-SD interface
 wire qlsd_en  = (!gc_en || rom_shadow) && cpu_rom && cpu_rd;
@@ -500,7 +576,7 @@ end
 reg [11:0] reset_cnt;
 wire reset = (reset_cnt != 0);
 always @(posedge clk_sys) begin
-	if(RESET || buttons[1] || osd_reset || !pll_locked || rom_download)
+	if(buttons[1] || osd_reset || !pll_locked || rom_download)
 		reset_cnt <= 12'hfff;
 	else if(ce_bus_p && reset_cnt != 0)
 		reset_cnt <= reset_cnt - 1'd1;
@@ -607,29 +683,42 @@ dpram #(15) vram
 
 wire video_r, video_g, video_b;
 wire HS, VS;
-wire HBlank, VBlank, ce_pix;
+wire HBlank, VBlank;
 
 reg HSync, VSync;
-always @(posedge CLK_VIDEO) begin
+always @(posedge clk_sys) begin
 	HSync <= HS;
 	if(~HSync & HS) VSync <= VS;
 end
 
-assign VGA_SL = scale ? scale - 1'd1 : 2'd0;
-assign VGA_F1 = 0;
 
-assign CLK_VIDEO = clk_sys;
 
-video_mixer #(.HALF_DEPTH(1), .GAMMA(1)) video_mixer
+//video_mixer #(.HALF_DEPTH(1), .GAMMA(1)) video_mixer
+//(
+//	.*,
+//	.scandoubler(scale || forced_scandoubler),
+//	.hq2x(scale==1),
+//	.freeze_sync(),
+//	
+//	.R({4{video_r}}),
+//	.G({4{video_g}}),
+//	.B({4{video_b}})
+//);
+
+mist_video #(.OSD_COLOR(3'd5), .SD_HCNT_WIDTH(10), .OUT_COLOR_DEPTH(VGA_BITS), .BIG_OSD(BIG_OSD)) mist_video 
 (
-	.*,
-	.scandoubler(scale || forced_scandoubler),
-	.hq2x(scale==1),
-	.freeze_sync(),
-	
-	.R({4{video_r}}),
-	.G({4{video_g}}),
-	.B({4{video_b}})
+   .*,
+	.clk_sys(clk_video),
+	.scanlines(status[10:9]),
+	.ce_divider(1'b1),
+	.rotate(2'b00),
+	.blend(1'b0),
+	.VGA_HB(),
+	.VGA_VB(),
+	.VGA_DE(),
+	.R({6{video_r}}),
+	.G({6{video_g}}),
+	.B({6{video_b}})
 );
 
 wire [14:0] video_addr;
@@ -649,6 +738,8 @@ begin
 		mc_stat <= cpu_dout[7:0];
 	end
 end
+
+wire ce_pix;
 
 zx8301 zx8301
 (
@@ -682,10 +773,7 @@ wire [15:0] zx8302_dout;
 wire mdv_download = (ioctl_index == MDV_IOCTL_INDEX) && ioctl_download;
 
 wire audio;
-assign AUDIO_L = {15{audio}};
-assign AUDIO_R = {15{audio}};
-assign AUDIO_S = 0;
-assign AUDIO_MIX = 0;
+wire [15:0]  AUDIO_QL = {15{audio}};
 
 wire mdv_led;
 
@@ -886,5 +974,27 @@ fx68k fx68k
 	.oEdb				( cpu_dout		),
 	.eab				( cpu_addr16	)
 );
+
+`ifdef I2S_AUDIO
+
+wire [31:0] clk_rate =  32'd84_000_000;
+
+i2s i2s (
+        .reset(reset),
+        .clk(clk_sys),
+        .clk_rate(clk_rate),
+
+        .sclk(I2S_BCK),
+        .lrclk(I2S_LRCK),
+        .sdata(I2S_DATA),
+
+        .left_chan ({~AUDIO_QL[15],AUDIO_QL[14:0]}),
+        .right_chan({~AUDIO_QL[15],AUDIO_QL[14:0]})
+);
+
+assign AUDIO_L=audio;
+assign AUDIO_R=audio;
+
+`endif
 
 endmodule
